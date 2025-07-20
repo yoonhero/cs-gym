@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import Machine from './Machine.svelte';
 	import Editor from './Editor.svelte';
+	import { Graph } from './Graph';
 
 	let currentView = $state('editor'); // 'machine' or 'editor'
 
