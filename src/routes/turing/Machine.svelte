@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import Head from './Head.svelte';
 
-	let { algorithm, transitions, updateTransitions } = $props();
+	let { algorithm, transitions } = $props();
 
 	let tape_block_width = 80;
 

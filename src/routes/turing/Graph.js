@@ -1,3 +1,5 @@
+import { exportTransitions, parseAlgorithm } from './Parser';
+
 export let radius = 40;
 
 let axisColor = '#e9e9e9';
@@ -34,6 +36,9 @@ class GraphicHelper {
 		this.dblStartPos = {};
 		this.dblStartID;
 		this.dblCurPos = {};
+		this.isCreatingTransition = false;
+		this.transitionStartState = null;
+		this.transitionCurrentPos = null;
 
 		this.render();
 	}
@@ -71,7 +76,191 @@ class GraphicHelper {
 		this.ctx.clearRect(x - 50, y - 50, xx + 50, yy + 50);
 	}
 
-	renderTransitions() {}
+	renderTransition(arrow, curveOffset = 0, totalCurves = 1) {
+		const { fromPos, toPos, read, write, move } = arrow;
+
+		// Choose color based on (read, write)
+		let color;
+		if (read === '0' && write === '0')
+			color = '#2980b9'; // Blue
+		else if (read === '0' && write === '1')
+			color = '#27ae60'; // Green
+		else if (read === '1' && write === '0')
+			color = '#fdcb6e'; // Orange
+		else if (read === '1' && write === '1')
+			color = '#d63031'; // Red
+		else color = '#b2bec3'; // Gray for unexpected values
+
+		const ctx = this.ctx;
+		ctx.save();
+		ctx.strokeStyle = color;
+		ctx.fillStyle = color;
+		ctx.lineWidth = 4;
+
+		// Self-loop
+		if (fromPos.x === toPos.x && fromPos.y === toPos.y) {
+			// Improved: offset multiple self-loops horizontally
+			const loopRadius = radius * 0.9;
+			const baseAngle = -Math.PI / 2; // Always above
+			const offsetStep = Math.PI / 8; // Spread loops horizontally
+			const offsetAngle = baseAngle + (curveOffset - (totalCurves - 1) / 2) * offsetStep;
+			const cx = fromPos.x + Math.cos(offsetAngle) * (radius + loopRadius);
+			const cy = fromPos.y + Math.sin(offsetAngle) * (radius + loopRadius);
+
+			ctx.beginPath();
+			ctx.arc(cx, cy, loopRadius, Math.PI * 0.7, Math.PI * 2.3, false);
+			ctx.stroke();
+
+			// Arrowhead for loop
+			const arrowAngle = Math.PI * 2.3;
+			const arrowX = cx + loopRadius * Math.cos(arrowAngle);
+			const arrowY = cy + loopRadius * Math.sin(arrowAngle);
+			const arrowLength = 14;
+			ctx.beginPath();
+			ctx.moveTo(arrowX, arrowY);
+			ctx.lineTo(
+				arrowX - arrowLength * Math.cos(arrowAngle - Math.PI / 6),
+				arrowY - arrowLength * Math.sin(arrowAngle - Math.PI / 6)
+			);
+			ctx.lineTo(
+				arrowX - arrowLength * Math.cos(arrowAngle + Math.PI / 6),
+				arrowY - arrowLength * Math.sin(arrowAngle + Math.PI / 6)
+			);
+			ctx.closePath();
+			ctx.fill();
+
+			// Label: further above the loop for clarity
+			const labelOffset = loopRadius + 18;
+			const labelX = cx;
+			const labelY = cy - labelOffset;
+			ctx.save();
+			ctx.font = 'bold 20px Arial';
+			ctx.fillStyle = color;
+			ctx.textAlign = 'center';
+			ctx.textBaseline = 'bottom';
+			ctx.fillText(move, labelX, labelY);
+			ctx.restore();
+
+			ctx.restore();
+			return;
+		}
+
+		// Calculate direction
+		const dx = toPos.x - fromPos.x;
+		const dy = toPos.y - fromPos.y;
+		const len = Math.sqrt(dx * dx + dy * dy);
+
+		// Shorten the line so it doesn't overlap the node circles
+		const startX = fromPos.x + (dx / len) * radius;
+		const startY = fromPos.y + (dy / len) * radius;
+		const endX = toPos.x - (dx / len) * radius;
+		const endY = toPos.y - (dy / len) * radius;
+
+		// Curved edge for multiple transitions
+		let mx = (startX + endX) / 2;
+		let my = (startY + endY) / 2;
+		if (totalCurves > 1) {
+			// Perpendicular direction
+			const norm = { x: -dy / len, y: dx / len };
+			const curveStrength = 40 + 12 * (totalCurves - 2); // More curves, more spread
+			const offset = (curveOffset - (totalCurves - 1) / 2) * curveStrength;
+			mx += norm.x * offset;
+			my += norm.y * offset;
+		}
+
+		ctx.beginPath();
+		if (totalCurves > 1) {
+			ctx.moveTo(startX, startY);
+			ctx.quadraticCurveTo(mx, my, endX, endY);
+		} else {
+			ctx.moveTo(startX, startY);
+			ctx.lineTo(endX, endY);
+		}
+		ctx.stroke();
+
+		// Draw arrowhead
+		const arrowLength = 18;
+		let angle;
+		if (totalCurves > 1) {
+			// Angle of tangent at end of quadratic curve
+			const t = 0.95;
+			const dxCurve = 2 * (1 - t) * (mx - startX) + 2 * t * (endX - mx);
+			const dyCurve = 2 * (1 - t) * (my - startY) + 2 * t * (endY - my);
+			angle = Math.atan2(dyCurve, dxCurve);
+		} else {
+			angle = Math.atan2(dy, dx);
+		}
+
+		ctx.beginPath();
+		ctx.moveTo(endX, endY);
+		ctx.lineTo(
+			endX - arrowLength * Math.cos(angle - Math.PI / 6),
+			endY - arrowLength * Math.sin(angle - Math.PI / 6)
+		);
+		ctx.lineTo(
+			endX - arrowLength * Math.cos(angle + Math.PI / 6),
+			endY - arrowLength * Math.sin(angle + Math.PI / 6)
+		);
+		ctx.closePath();
+		ctx.fill();
+
+		// Draw move label at the middle of the curve
+		ctx.save();
+		ctx.font = 'bold 20px Arial';
+		ctx.fillStyle = color;
+		ctx.textAlign = 'center';
+		ctx.textBaseline = 'bottom';
+		ctx.fillText(move, mx, my - 8);
+		ctx.restore();
+
+		ctx.restore();
+	}
+
+	renderTransitions() {
+		if (!this.graph) return;
+		// Group transitions by unordered pair (from, to)
+		const groups = {};
+		const transitions = this.graph.transitions();
+		for (let i = 0; i < transitions.length; i++) {
+			const t = transitions[i];
+			if (t.transitionFrom === t.transitionTo) {
+				// Self-loops: use unique key
+				const key = `self:${t.transitionFrom}`;
+				if (!groups[key]) groups[key] = [];
+				groups[key].push(t);
+			} else {
+				const sorted = [t.transitionFrom, t.transitionTo].sort((a, b) => a - b);
+				const key = `${sorted[0]},${sorted[1]}`;
+				if (!groups[key]) groups[key] = [];
+				groups[key].push(t);
+			}
+		}
+		// Draw each group with mirrored curve offsets for each direction
+		for (const key in groups) {
+			const group = groups[key];
+			if (key.startsWith('self:')) {
+				// Self-loops: all transitions are self-loops on the same node
+				for (let i = 0; i < group.length; i++) {
+					const arrow = this.graph.getTransitionArrow(group[i]);
+					this.renderTransition(arrow, i, group.length);
+				}
+			} else {
+				// Split by direction
+				const [a, b] = key.split(',');
+				const forward = group.filter((t) => t.transitionFrom == a && t.transitionTo == b);
+				const backward = group.filter((t) => t.transitionFrom == b && t.transitionTo == a);
+				// Forward: curveOffset 0,1,2...; Backward: curveOffset 0,-1,-2...
+				for (let i = 0; i < forward.length; i++) {
+					const arrow = this.graph.getTransitionArrow(forward[i]);
+					this.renderTransition(arrow, i + 1, Math.max(forward.length, backward.length));
+				}
+				for (let i = 0; i < backward.length; i++) {
+					const arrow = this.graph.getTransitionArrow(backward[i]);
+					this.renderTransition(arrow, -(i + 1), Math.max(forward.length, backward.length));
+				}
+			}
+		}
+	}
 
 	renderState(key, pos) {
 		const { x, y } = pos;
@@ -106,7 +295,6 @@ class GraphicHelper {
 		if (!this.graph) return;
 		for (let key in this.graph.states()) {
 			const pos = this.graph.statePos(key);
-			console.log(pos);
 			this.renderState(key, pos);
 		}
 	}
@@ -160,8 +348,16 @@ class GraphicHelper {
 			yy: newYY > yy ? newYY : yy
 		};
 		this.renderBoard();
-		this.renderStates();
 		this.renderTransitions();
+		this.renderStates();
+
+		// Draw temporary transition if in creation mode
+		if (this.isCreatingTransition && this.transitionStartState && this.transitionCurrentPos) {
+			const fromPos = this.graph.statePos(this.transitionStartState);
+			const toPos = this.transitionCurrentPos;
+			const tempArrow = { fromPos, toPos, read: '', write: '', move: '' };
+			this.renderTransition(tempArrow);
+		}
 	}
 
 	handleStart(e) {
@@ -188,8 +384,11 @@ class GraphicHelper {
 			dy = (clientY - this.prevY) / this.zoom;
 
 		if (this.isTranslation && this.translation) this.handleBoard(dx, dy);
-		if (this.isStateMove) this.handleState(dx, dy);
-		if (this.isDblClick) this.dblCurPos = this.getLocalPos({ x: clientX, y: clientY });
+		else if (this.isStateMove) this.handleState(dx, dy);
+		else if (this.isCreatingTransition) {
+			this.transitionCurrentPos = this.getLocalPos({ x: clientX, y: clientY });
+		}
+		// else return;
 
 		this.prevX = clientX;
 		this.prevY = clientY;
@@ -208,10 +407,20 @@ class GraphicHelper {
 	}
 
 	handleEnd(e) {
+		if (this.isCreatingTransition) {
+			const pos = this.getLocalPos({ x: e.clientX, y: e.clientY });
+			const endStateID = this.graph.check(pos);
+			if (endStateID && endStateID !== this.transitionStartState) {
+				this.graph.addTransition(this.transitionStartState, endStateID);
+			}
+			this.isCreatingTransition = false;
+			this.transitionStartState = null;
+			this.transitionCurrentPos = null;
+			this.render();
+			return;
+		}
 		this.isStateMove = false;
 		this.isTranslation = false;
-		if (this.isDblClick) this.createTransition();
-		this.isDblClick = false;
 	}
 
 	handleLeave(e) {
@@ -226,9 +435,10 @@ class GraphicHelper {
 
 		if (!startStateID) return;
 
-		this.isDblClick = true;
-		this.dblStartPos = pos;
-		this.dblStartID = startStateID;
+		this.isCreatingTransition = true;
+		this.transitionStartState = startStateID;
+		this.transitionCurrentPos = pos;
+		this.render();
 	}
 
 	createTransition() {
@@ -241,6 +451,8 @@ class GraphicHelper {
 		this.dblStartID;
 		this.dblStartPos;
 		this.dblCurPos;
+
+		this.render();
 	}
 }
 
@@ -266,14 +478,52 @@ class StateNode {
 	}
 }
 
+class TransitionVertex {
+	constructor(transitionFrom, transitionTo, read, write, move) {
+		this.transitionFrom = transitionFrom;
+		this.transitionTo = transitionTo;
+		this.read = read;
+		this.write = write;
+		this.move = move;
+	}
+
+	transition() {
+		return {
+			transitionFrom: this.transitionFrom,
+			transitionTo: this.transitionTo,
+			read: this.read,
+			write: this.write,
+			move: this.move
+		};
+	}
+
+	checkClick(pos, startPos, endPos) {
+		// (x-axT a/|a||a|) - projection
+		return;
+	}
+}
+
+// 0~1 X + X + X ... ~ N(n*mu, std/root(n))
+function CLT(times) {
+	let num = 0;
+	for (let i = 0; i < times; i++) {
+		num += Math.random();
+	}
+	return num / times;
+}
+
 class Graph {
 	constructor() {
 		this._states = {};
-		this.transitions = {};
+		this._transitions = [];
 	}
 
 	states() {
 		return this._states;
+	}
+
+	transitions() {
+		return this._transitions;
 	}
 
 	statePos(value) {
@@ -283,8 +533,8 @@ class Graph {
 	determinePos(viewpointRect) {
 		const { x: sx, y: sy, xx, yy } = viewpointRect;
 		while (true) {
-			const newX = Math.random() * (xx - sx) + sx;
-			const newY = Math.random() * (yy - sy) + sy;
+			const newX = CLT(3) * (xx - sx) + sx;
+			const newY = CLT(3) * (yy - sy) + sy;
 			const pos = { x: newX, y: newY };
 			const check = this.check(pos);
 			if (check) {
@@ -294,8 +544,20 @@ class Graph {
 		}
 	}
 
-	addState(pos) {
-		const node = new StateNode(Object.keys(this._states).length, pos);
+	getTransitionArrow(transition) {
+		const { transitionFrom, transitionTo, read, write, move } = transition;
+		return {
+			fromPos: this.statePos(transitionFrom),
+			toPos: this.statePos(transitionTo),
+			read,
+			write,
+			move
+		};
+	}
+
+	addState(pos, key = undefined) {
+		if (!key) key = Object.keys(this._states).length;
+		const node = new StateNode(key, pos);
 		this._states[node.value] = node;
 	}
 
@@ -303,7 +565,10 @@ class Graph {
 		this._states[value].updateCoord(dx, dy);
 	}
 
-	addTransition(start, end) {}
+	addTransition(transitionFrom, transitionTo, read = '0', write = '0', move = 'H') {
+		const transition = new TransitionVertex(transitionFrom, transitionTo, read, write, move);
+		this._transitions.push(transition);
+	}
 
 	check(pos) {
 		for (let i in this._states) {
@@ -311,13 +576,43 @@ class Graph {
 		}
 	}
 
-	handleUpdate() {
-		generateAlgorithm();
+	checkVertexesClick(pos) {
+		for (let i = 0; i < this._transitions.length; i++) {
+			const t = this._transitions[i];
+			const { transitionFrom, transitionTo } = t.transition();
+			if (t.checkClick(pos, this.statePos(transitionFrom), this.statePos(transitionTo))) return i;
+		}
+	}
+
+	exportGraph() {
+		return exportTransitions(this._transitions);
 	}
 
 	handleReset() {
-		algorithm = '';
+		this.algorithm = '';
 		updateTransitions(algorithm);
+	}
+
+	static loadAlgorithm(algorithm, width, height) {
+		let graph = new Graph();
+		let transitions = parseAlgorithm(algorithm);
+		let states = [];
+		const viewpointRect = { x: 0, y: 0, xx: width, yy: height };
+		transitions.forEach((transition) => {
+			const { transitionFrom, transitionTo, read, write, move } = transition;
+			if (states.indexOf(transitionFrom) == -1) {
+				const pos = graph.determinePos(viewpointRect);
+				graph.addState(pos, transitionFrom);
+				states.push(transitionFrom);
+			}
+			if (states.indexOf(transitionTo) == -1) {
+				const pos = graph.determinePos(viewpointRect);
+				graph.addState(pos, transitionTo);
+				states.push(transitionTo);
+			}
+			graph.addTransition(...Object.values(transition));
+		});
+		return graph;
 	}
 }
 

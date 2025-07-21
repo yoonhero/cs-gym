@@ -3,63 +3,35 @@
 	import Machine from './Machine.svelte';
 	import Editor from './Editor.svelte';
 	import { Graph } from './Graph';
+	import { updateTransitionMapFromAlgorithm } from './Parser';
 
 	let currentView = $state('editor'); // 'machine' or 'editor'
 
-	let algorithm = $state('0->1:0,0/R; 0->2:1,1/R; 1->3:0,0/R; 1->3:1,0/R; 2->3:0,1/R; 2->3:1,1/R');
-
+	let algorithm = $state('0->1:0,0/R; 0->2:1,1/R; 1->3:0,0/R; 1->3:1,0/R; 2->3:0,1/R; 2->3:1,1/R;');
 	let transitions = $state({});
+	// let exportGraph = $state()
 
-	const allowedExpr = /\d->\d:\d,\d\/[RL]/;
-
-	function parseTransition(line) {
-		let pointer = 0;
-		let i = 0;
-		line = line.replace(/\s+/g, '');
-		if (!allowedExpr.test(line)) {
-			return;
-		}
-		let segment = line.match(/\d+|->|[:\/,]|[RHL]/g);
-
-		return {
-			transitionFrom: segment[0],
-			transitionTo: segment[2],
-			read: segment[4],
-			write: segment[6],
-			move: segment[8]
-		};
-	}
-
-	function parseAlgorithm(algorithm) {
-		let pointer = 0;
-		const _transitions = algorithm.split(';').map(parseTransition);
-		return _transitions;
-	}
-
-	function updateTransitions(algorithm) {
-		transitions = {};
-		const new_transitions = parseAlgorithm(algorithm);
-		new_transitions.forEach((transition) => {
-			const { transitionFrom, read, ...etc } = transition;
-			if (!transitions[transitionFrom]) {
-				transitions[transitionFrom] = {};
-			}
-			transitions[transitionFrom][read] = etc;
-		});
+	function changeCurrentView(mode) {
+		// if (exportGraph) algorithm = exportGraph()
+		currentView = mode;
 	}
 
 	function handleKeydown(event) {
 		switch (event.code) {
 			case 'Tab':
 				event.preventDefault();
-				currentView = currentView === 'machine' ? 'editor' : 'machine';
+				if (currentView === 'machine') {
+					changeCurrentView('editor');
+				} else {
+					changeCurrentView('machine');
+				}
 				break;
 		}
 	}
 
 	onMount(() => {
 		window.addEventListener('keydown', handleKeydown);
-		updateTransitions(algorithm);
+		transitions = updateTransitionMapFromAlgorithm(algorithm);
 	});
 </script>
 
@@ -67,22 +39,22 @@
 	<div class="toggle-bar">
 		<button
 			class="toggle-btn {currentView === 'machine' ? 'active' : ''}"
-			onclick={() => (currentView = 'machine')}
+			onclick={() => changeCurrentView('machine')}
 		>
 			Machine
 		</button>
 		<button
 			class="toggle-btn {currentView === 'editor' ? 'active' : ''}"
-			onclick={() => (currentView = 'editor')}
+			onclick={() => changeCurrentView('editor')}
 		>
 			Editor
 		</button>
 	</div>
 
 	{#if currentView === 'machine'}
-		<Machine {algorithm} {transitions} {updateTransitions} />
+		<Machine {algorithm} {transitions} />
 	{:else}
-		<Editor bind:algorithm {updateTransitions} />
+		<Editor bind:algorithm />
 	{/if}
 </div>
 
