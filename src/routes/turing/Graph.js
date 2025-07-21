@@ -7,18 +7,19 @@ let nodeBaColor = '#111';
 let textColor = 'white';
 
 class GraphicHelper {
-	constructor(canvas, graph, width, height, tx = 0, ty = 0) {
+	constructor(canvas, graph, width, height, onTransitionSelect = () => {}) {
 		this.graph = graph;
 		this.ctx = canvas.getContext('2d');
 		const { top, left } = canvas.getBoundingClientRect();
 		this.top = top;
 		this.left = left;
-
+		const tx = 0,
+			ty = 0;
 		this.width = width;
 		this.height = height;
 		this.unit = 50;
 		this.zoom = 1; // zoom level -> 50px = unit vec
-		this.translation = { x: -tx, y: ty }; // 평행이동
+		this.translation = { x: 0, y: 0 }; // screen space translation
 		this.setZoom(this.zoom);
 		this.renderBoundingBox = {
 			x: tx,
@@ -32,13 +33,11 @@ class GraphicHelper {
 		this.isTranslation = false;
 		this.focusedState;
 		this.isStateMove = false;
-		this.isDblClick = false;
-		this.dblStartPos = {};
-		this.dblStartID;
-		this.dblCurPos = {};
 		this.isCreatingTransition = false;
 		this.transitionStartState = null;
 		this.transitionCurrentPos = null;
+
+		this.onTransitionSelect = onTransitionSelect;
 
 		this.render();
 	}
@@ -46,6 +45,7 @@ class GraphicHelper {
 	updateBox(width, height) {
 		this.width = width;
 		this.height = height;
+		this.setZoom(this.zoom);
 	}
 
 	getViewpointRect() {
@@ -66,8 +66,13 @@ class GraphicHelper {
 	}
 
 	setZoom(zoom) {
+		this.zoom = zoom;
 		this.boundingWidth = this.width / zoom;
 		this.boundingHeight = this.height / zoom;
+	}
+
+	setGraph(graph) {
+		this.graph = graph;
 	}
 
 	clear() {
@@ -347,35 +352,36 @@ class GraphicHelper {
 			y: traY < y ? traY : y,
 			yy: newYY > yy ? newYY : yy
 		};
+
 		this.renderBoard();
 		this.renderTransitions();
 		this.renderStates();
 
-		// Draw temporary transition if in creation mode
 		if (this.isCreatingTransition && this.transitionStartState && this.transitionCurrentPos) {
 			const fromPos = this.graph.statePos(this.transitionStartState);
 			const toPos = this.transitionCurrentPos;
-			const tempArrow = { fromPos, toPos, read: '', write: '', move: '' };
-			this.renderTransition(tempArrow);
+			this.renderTemporaryTransition(fromPos, toPos);
 		}
 	}
 
 	handleStart(e) {
-		const pos = {
-			x: e.clientX / this.zoom - this.translation.x,
-			y: e.clientY / this.zoom - this.translation.y
-		};
+		const pos = this.getLocalPos({ x: e.clientX, y: e.clientY });
+		this.prevX = e.clientX;
+		this.prevY = e.clientY;
 
 		const stateID = this.graph.check(pos);
 		if (stateID) {
 			this.isStateMove = true;
 			this.focusedState = stateID;
 		} else {
-			this.isTranslation = true;
+			const vertexIndex = this.graph.checkVertexesClick(pos);
+			if (vertexIndex !== undefined) {
+				console.log(this.onTransitionSelect);
+				this.onTransitionSelect(vertexIndex);
+			} else {
+				this.isTranslation = true;
+			}
 		}
-
-		this.prevX = e.clientX;
-		this.prevY = e.clientY;
 	}
 
 	handleMove(e) {
@@ -388,7 +394,6 @@ class GraphicHelper {
 		else if (this.isCreatingTransition) {
 			this.transitionCurrentPos = this.getLocalPos({ x: clientX, y: clientY });
 		}
-		// else return;
 
 		this.prevX = clientX;
 		this.prevY = clientY;
@@ -410,14 +415,18 @@ class GraphicHelper {
 		if (this.isCreatingTransition) {
 			const pos = this.getLocalPos({ x: e.clientX, y: e.clientY });
 			const endStateID = this.graph.check(pos);
-			if (endStateID && endStateID !== this.transitionStartState) {
+			if (endStateID) {
 				this.graph.addTransition(this.transitionStartState, endStateID);
+				this.onTransitionSelect(this.graph.transitions().length - 1);
 			}
 			this.isCreatingTransition = false;
 			this.transitionStartState = null;
 			this.transitionCurrentPos = null;
-			this.render();
-			return;
+
+			if (endStateID) {
+				this.render();
+				return true;
+			}
 		}
 		this.isStateMove = false;
 		this.isTranslation = false;
@@ -497,9 +506,81 @@ class TransitionVertex {
 		};
 	}
 
-	checkClick(pos, startPos, endPos) {
-		// (x-axT a/|a||a|) - projection
-		return;
+	checkClick(pos, startPos, endPos, curveOffset = 0, totalCurves = 1) {
+		const clickThreshold = 8; // pixels, generous for touch
+
+		// Self-loop
+		if (startPos.x === endPos.x && startPos.y === endPos.y) {
+			const loopRadius = radius * 0.9;
+			const baseAngle = -Math.PI / 2;
+			const offsetStep = Math.PI / 8;
+			const offsetAngle = baseAngle + (curveOffset - (totalCurves - 1) / 2) * offsetStep;
+			const cx = startPos.x + Math.cos(offsetAngle) * (radius + loopRadius);
+			const cy = startPos.y + Math.sin(offsetAngle) * (radius + loopRadius);
+
+			const dist = Math.sqrt((pos.x - cx) ** 2 + (pos.y - cy) ** 2);
+			return Math.abs(dist - loopRadius) < clickThreshold;
+		}
+
+		// Line between two different states
+		const dx = endPos.x - startPos.x;
+		const dy = endPos.y - startPos.y;
+		const len = Math.sqrt(dx * dx + dy * dy);
+
+		if (len === 0) return false;
+
+		const startX = startPos.x + (dx / len) * radius;
+		const startY = startPos.y + (dy / len) * radius;
+		const endX = endPos.x - (dx / len) * radius;
+		const endY = endPos.y - (dy / len) * radius;
+
+		// Straight line
+		if (totalCurves <= 1) {
+			const lineLenSq = (endX - startX) ** 2 + (endY - startY) ** 2;
+			if (lineLenSq === 0) return false;
+
+			const t =
+				((pos.x - startX) * (endX - startX) + (pos.y - startY) * (endY - startY)) / lineLenSq;
+
+			if (t < 0 || t > 1) {
+				return false; // Click is outside the line segment
+			}
+
+			// Projection is on the segment, check distance to line
+			const dist =
+				Math.abs((endX - startX) * (startY - pos.y) - (startX - pos.x) * (endY - startY)) /
+				Math.sqrt(lineLenSq);
+
+			return dist < clickThreshold;
+		}
+
+		// Curved line
+		let mx = (startX + endX) / 2;
+		let my = (startY + endY) / 2;
+
+		const norm = { x: -dy / len, y: dx / len };
+		const curveStrength = 40 + 12 * (totalCurves - 2);
+		const offset = (curveOffset - (totalCurves - 1) / 2) * curveStrength;
+		mx += norm.x * offset;
+		my += norm.y * offset;
+
+		// Check distance to quadratic Bezier curve by sampling
+		let min_dist_sq = Infinity;
+		const p0 = { x: startX, y: startY };
+		const p1 = { x: mx, y: my };
+		const p2 = { x: endX, y: endY };
+
+		for (let t = 0; t <= 1; t += 0.05) {
+			const mt = 1 - t;
+			const x = mt * mt * p0.x + 2 * mt * t * p1.x + t * t * p2.x;
+			const y = mt * mt * p0.y + 2 * mt * t * p1.y + t * t * p2.y;
+			const dist_sq = (pos.x - x) ** 2 + (pos.y - y) ** 2;
+			if (dist_sq < min_dist_sq) {
+				min_dist_sq = dist_sq;
+			}
+		}
+
+		return min_dist_sq < clickThreshold ** 2;
 	}
 }
 
@@ -577,10 +658,60 @@ class Graph {
 	}
 
 	checkVertexesClick(pos) {
-		for (let i = 0; i < this._transitions.length; i++) {
-			const t = this._transitions[i];
-			const { transitionFrom, transitionTo } = t.transition();
-			if (t.checkClick(pos, this.statePos(transitionFrom), this.statePos(transitionTo))) return i;
+		const groups = {};
+		const transitions = this.transitions();
+		for (let i = 0; i < transitions.length; i++) {
+			const t = transitions[i];
+			if (t.transitionFrom === t.transitionTo) {
+				const key = `self:${t.transitionFrom}`;
+				if (!groups[key]) groups[key] = [];
+				groups[key].push({ ...t, originalIndex: i });
+			} else {
+				const sorted = [t.transitionFrom, t.transitionTo].sort((a, b) => a - b);
+				const key = `${sorted[0]},${sorted[1]}`;
+				if (!groups[key]) groups[key] = [];
+				groups[key].push({ ...t, originalIndex: i });
+			}
+		}
+
+		for (const key in groups) {
+			const group = groups[key];
+			if (key.startsWith('self:')) {
+				for (let i = 0; i < group.length; i++) {
+					const t = group[i];
+					const startPos = this.statePos(t.transitionFrom);
+					if (t.checkClick(pos, startPos, startPos, i, group.length)) {
+						return t.originalIndex;
+					}
+				}
+			} else {
+				const [a, b] = key.split(',');
+				const forward = group.filter((t) => t.transitionFrom == a && t.transitionTo == b);
+				const backward = group.filter((t) => t.transitionFrom == b && t.transitionTo == a);
+
+				for (let i = 0; i < forward.length; i++) {
+					const t = forward[i];
+					const startPos = this.statePos(t.transitionFrom);
+					const endPos = this.statePos(t.transitionTo);
+					console.log(t.checkClick);
+					if (
+						t.checkClick(pos, startPos, endPos, i + 1, Math.max(forward.length, backward.length))
+					) {
+						return t.originalIndex;
+					}
+				}
+
+				for (let i = 0; i < backward.length; i++) {
+					const t = backward[i];
+					const startPos = this.statePos(t.transitionFrom);
+					const endPos = this.statePos(t.transitionTo);
+					if (
+						t.checkClick(pos, startPos, endPos, -(i + 1), Math.max(forward.length, backward.length))
+					) {
+						return t.originalIndex;
+					}
+				}
+			}
 		}
 	}
 

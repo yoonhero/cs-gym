@@ -13,6 +13,8 @@
 	let width = $state(500),
 		height = $state(500);
 
+	let editingTransition = $state(null);
+
 	// Update canvas size on window resize
 	function updateSize() {
 		width = window.innerWidth;
@@ -28,6 +30,11 @@
 			graph = new Graph();
 		}
 
+		helper = new GraphicHelper(canvas, graph, width, height);
+		helper.onTransitionSelect = (index) => {
+			editingTransition = { index, ...graph.getTransition(index) };
+		};
+
 		window.addEventListener('resize', updateSize);
 		return () => window.removeEventListener('resize', updateSize);
 	});
@@ -40,14 +47,15 @@
 		helper.handleMove(e);
 	}
 	function handleStart(e) {
-		const update = helper.handleStart(e);
-		if (update) updateAlgorithm();
+		helper.handleStart(e);
 	}
 	function handleEnd(e) {
 		helper.handleEnd(e);
+		updateAlgorithm();
 	}
 	function handleLeave(e) {
-		helper.handleLeave(e);
+		helper.handleEnd(e);
+		updateAlgorithm();
 	}
 
 	function updateAlgorithm() {
@@ -64,6 +72,32 @@
 
 	function handleDblClick(e) {
 		helper.startCreateTransition(e);
+	}
+
+	function resetGraph() {
+		graph = new Graph();
+		helper.setGraph(graph);
+		helper.render();
+		updateAlgorithm();
+	}
+
+	function saveTransition() {
+		graph.updateTransition(
+			editingTransition.index,
+			editingTransition.read,
+			editingTransition.write,
+			editingTransition.move
+		);
+		editingTransition = null;
+		helper.render();
+		updateAlgorithm();
+	}
+
+	function deleteTransition() {
+		graph.deleteTransition(editingTransition.index);
+		editingTransition = null;
+		helper.render();
+		updateAlgorithm();
 	}
 </script>
 
@@ -85,10 +119,26 @@
 
 <button class="add-state-btn" onclick={addState}>+ State</button>
 
-<!-- control panel -->
-<div>
-	<h1></h1>
-</div>
+{#if editingTransition}
+	<div class="edit-panel">
+		<h2>Edit Transition</h2>
+		<div>
+			<label>Read:</label>
+			<input bind:value={editingTransition.read} />
+		</div>
+		<div>
+			<label>Write:</label>
+			<input bind:value={editingTransition.write} />
+		</div>
+		<div>
+			<label>Move:</label>
+			<input bind:value={editingTransition.move} />
+		</div>
+		<button onclick={saveTransition}>Save</button>
+		<button onclick={deleteTransition}>Delete</button>
+		<button onclick={() => (editingTransition = null)}>Cancel</button>
+	</div>
+{/if}
 
 <!-- Transition Type Legend -->
 <div class="legend">
@@ -108,7 +158,21 @@
 	<div class="legend-row"><span class="legend-color" style="background: #b2bec3"></span> Other</div>
 </div>
 
+<!-- Reset Button -->
+<button class="reset-btn" onclick={resetGraph}>Reset</button>
+
 <style>
+	.edit-panel {
+		position: fixed;
+		top: 50%;
+		left: 50%;
+		transform: translate(-50%, -50%);
+		background: white;
+		padding: 2em;
+		border-radius: 8px;
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+		z-index: 100;
+	}
 	canvas {
 		position: fixed;
 		left: 0;
@@ -122,7 +186,7 @@
 		top: 32px;
 		right: 32px;
 		padding: 0.6em 1em;
-		background: #111; /* or keep #2563eb for emphasis */
+		background: #111;
 		color: white;
 		border: none;
 		border-radius: 8px;
@@ -137,7 +201,7 @@
 		z-index: 10;
 	}
 	.add-state-btn:hover {
-		background: #222; /* or #1d4ed8 if keeping blue */
+		background: #222;
 		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
 	}
 	.legend {
@@ -171,5 +235,28 @@
 		border-radius: 0.3em;
 		border: 1.5px solid #e0e0e0;
 		margin-right: 0.4em;
+	}
+	.reset-btn {
+		position: fixed;
+		bottom: 32px;
+		left: 32px;
+		padding: 0.6em 1.2em;
+		background: #b2bec3;
+		color: #222;
+		border: none;
+		border-radius: 8px;
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+		font-size: 1.1em;
+		font-family: 'IBM Plex Mono', monospace;
+		font-weight: 600;
+		cursor: pointer;
+		transition:
+			background 0.2s,
+			box-shadow 0.2s;
+		z-index: 20;
+	}
+	.reset-btn:hover {
+		background: #636e72;
+		color: #fff;
 	}
 </style>

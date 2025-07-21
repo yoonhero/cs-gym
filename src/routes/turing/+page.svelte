@@ -14,6 +14,7 @@
 	function changeCurrentView(mode) {
 		// if (exportGraph) algorithm = exportGraph()
 		currentView = mode;
+		transitions = updateTransitionMapFromAlgorithm(algorithm);
 	}
 
 	function handleKeydown(event) {

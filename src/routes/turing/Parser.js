@@ -1,4 +1,4 @@
-const allowedExpr = /\d->\d:\d,\d\/[RL]/;
+const allowedExpr = /\d->\d:\d,\d\/[RHL]/;
 
 function parseTransition(line) {
 	let pointer = 0;
@@ -21,6 +21,7 @@ function parseTransition(line) {
 function parseAlgorithm(algorithm) {
 	let pointer = 0;
 	if (algorithm.length > 0) algorithm = algorithm.slice(0, -1);
+	else return;
 	const _transitions = algorithm.split(';').map(parseTransition);
 	return _transitions;
 }
@@ -38,7 +39,7 @@ function updateTransitionMap(transitions) {
 }
 
 function updateTransitionMapFromAlgorithm(algorithm) {
-	const transitions = parseAlgorithm(algorithm);
+	const transitions = parseAlgorithm(algorithm) || [];
 	return updateTransitionMap(transitions);
 }
 
