@@ -23,6 +23,10 @@
 
 	let run = $state(false);
 	let finished = $state(false);
+	let speeds = $state([0, 0, 0, 0]);
+	let speed_hz = $derived(
+		speeds.reduce((prev, cur, i) => prev + Math.pow(2, speeds.length - 1 - i) * cur, 0)
+	); // paradoxically, 0Hz = fastest
 
 	function lazy_loading_tape(start, end) {
 		if (start < bounds.start) {
@@ -66,7 +70,8 @@
 				moveHead(-1);
 			}
 			runAlgorithm(transitionTo);
-		}, 500);
+		}, 1000 / speed_hz);
+		// rAF for more precise..
 	}
 
 	function startAlgorithm() {
@@ -88,6 +93,10 @@
 
 	function moveHead(dir) {
 		head_loc += dir;
+	}
+
+	function toggle(idx) {
+		speeds[idx] = 1 - speeds[idx];
 	}
 
 	function toggleCell(idx) {
@@ -160,6 +169,17 @@
 	</div>
 	<div class="instructions">
 		Use arrow keys or buttons to scroll the tape • Tab to switch views • Space to start/reset
+	</div>
+</div>
+
+<div class="speed-control">
+	<label for="speed">Speed: {speed_hz} Hz</label>
+	<div class="flex flex-row gap-1">
+		{#each speeds as val, i (i)}
+			<button class="tape_button {val == 1 && 'inverse_tape'}" onclick={() => toggle(i)}>
+				{speeds[i]}
+			</button>
+		{/each}
 	</div>
 </div>
 
@@ -288,5 +308,15 @@
 		box-shadow:
 			0 0 0 2px #333,
 			0 2px 8px 0 rgba(0, 0, 0, 0.04);
+	}
+
+	.speed-control {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.5em;
+		margin-top: 1em;
+		font-family: 'IBM Plex Mono', monospace;
+		color: #222;
 	}
 </style>

@@ -7,7 +7,7 @@ let nodeBaColor = '#111';
 let textColor = 'white';
 
 class GraphicHelper {
-	constructor(canvas, graph, width, height, onTransitionSelect = () => {}) {
+	constructor(canvas, graph, width, height, onTransitionSelect) {
 		this.graph = graph;
 		this.ctx = canvas.getContext('2d');
 		const { top, left } = canvas.getBoundingClientRect();
@@ -36,7 +36,6 @@ class GraphicHelper {
 		this.isCreatingTransition = false;
 		this.transitionStartState = null;
 		this.transitionCurrentPos = null;
-
 		this.onTransitionSelect = onTransitionSelect;
 
 		this.render();
@@ -364,6 +363,52 @@ class GraphicHelper {
 		}
 	}
 
+	renderTemporaryTransition(fromPos, toPos) {
+		const ctx = this.ctx;
+		ctx.save();
+
+		ctx.strokeStyle = '#b2bec3'; // A neutral gray color
+		ctx.fillStyle = '#b2bec3';
+		ctx.lineWidth = 3;
+		ctx.setLineDash([6, 4]); // Dashed line for temporary feel
+
+		const dx = toPos.x - fromPos.x;
+		const dy = toPos.y - fromPos.y;
+		const len = Math.sqrt(dx * dx + dy * dy);
+
+		// If the cursor is inside the starting node, don't draw anything.
+		if (len < radius) {
+			ctx.restore();
+			return;
+		}
+
+		const startX = fromPos.x + (dx / len) * radius;
+		const startY = fromPos.y + (dy / len) * radius;
+
+		ctx.beginPath();
+		ctx.moveTo(startX, startY);
+		ctx.lineTo(toPos.x, toPos.y);
+		ctx.stroke();
+
+		// Draw arrowhead at the cursor position
+		const angle = Math.atan2(dy, dx);
+		const arrowLength = 15;
+		ctx.beginPath();
+		ctx.moveTo(toPos.x, toPos.y);
+		ctx.lineTo(
+			toPos.x - arrowLength * Math.cos(angle - Math.PI / 6),
+			toPos.y - arrowLength * Math.sin(angle - Math.PI / 6)
+		);
+		ctx.lineTo(
+			toPos.x - arrowLength * Math.cos(angle + Math.PI / 6),
+			toPos.y - arrowLength * Math.sin(angle + Math.PI / 6)
+		);
+		ctx.closePath();
+		ctx.fill();
+
+		ctx.restore();
+	}
+
 	handleStart(e) {
 		const pos = this.getLocalPos({ x: e.clientX, y: e.clientY });
 		this.prevX = e.clientX;
@@ -625,6 +670,10 @@ class Graph {
 		}
 	}
 
+	getTransition(index) {
+		return this._transitions[index];
+	}
+
 	getTransitionArrow(transition) {
 		const { transitionFrom, transitionTo, read, write, move } = transition;
 		return {
@@ -646,7 +695,7 @@ class Graph {
 		this._states[value].updateCoord(dx, dy);
 	}
 
-	addTransition(transitionFrom, transitionTo, read = '0', write = '0', move = 'H') {
+	addTransition(transitionFrom, transitionTo, read = '0', write = '0', move = 'R') {
 		const transition = new TransitionVertex(transitionFrom, transitionTo, read, write, move);
 		this._transitions.push(transition);
 	}
@@ -665,12 +714,12 @@ class Graph {
 			if (t.transitionFrom === t.transitionTo) {
 				const key = `self:${t.transitionFrom}`;
 				if (!groups[key]) groups[key] = [];
-				groups[key].push({ ...t, originalIndex: i });
+				groups[key].push({ transition: t, originalIndex: i });
 			} else {
 				const sorted = [t.transitionFrom, t.transitionTo].sort((a, b) => a - b);
 				const key = `${sorted[0]},${sorted[1]}`;
 				if (!groups[key]) groups[key] = [];
-				groups[key].push({ ...t, originalIndex: i });
+				groups[key].push({ transition: t, originalIndex: i });
 			}
 		}
 
@@ -678,37 +727,43 @@ class Graph {
 			const group = groups[key];
 			if (key.startsWith('self:')) {
 				for (let i = 0; i < group.length; i++) {
-					const t = group[i];
+					const item = group[i];
+					const t = item.transition;
 					const startPos = this.statePos(t.transitionFrom);
 					if (t.checkClick(pos, startPos, startPos, i, group.length)) {
-						return t.originalIndex;
+						return item.originalIndex;
 					}
 				}
 			} else {
 				const [a, b] = key.split(',');
-				const forward = group.filter((t) => t.transitionFrom == a && t.transitionTo == b);
-				const backward = group.filter((t) => t.transitionFrom == b && t.transitionTo == a);
+				const forward = group.filter(
+					(item) => item.transition.transitionFrom == a && item.transition.transitionTo == b
+				);
+				const backward = group.filter(
+					(item) => item.transition.transitionFrom == b && item.transition.transitionTo == a
+				);
 
 				for (let i = 0; i < forward.length; i++) {
-					const t = forward[i];
+					const item = forward[i];
+					const t = item.transition;
 					const startPos = this.statePos(t.transitionFrom);
 					const endPos = this.statePos(t.transitionTo);
-					console.log(t.checkClick);
 					if (
 						t.checkClick(pos, startPos, endPos, i + 1, Math.max(forward.length, backward.length))
 					) {
-						return t.originalIndex;
+						return item.originalIndex;
 					}
 				}
 
 				for (let i = 0; i < backward.length; i++) {
-					const t = backward[i];
+					const item = backward[i];
+					const t = item.transition;
 					const startPos = this.statePos(t.transitionFrom);
 					const endPos = this.statePos(t.transitionTo);
 					if (
 						t.checkClick(pos, startPos, endPos, -(i + 1), Math.max(forward.length, backward.length))
 					) {
-						return t.originalIndex;
+						return item.originalIndex;
 					}
 				}
 			}
@@ -744,6 +799,40 @@ class Graph {
 			graph.addTransition(...Object.values(transition));
 		});
 		return graph;
+	}
+
+	updateTransition(index, read, write, move) {
+		const t = this._transitions[index];
+		if (!t) return;
+
+		// Check for duplicate (excluding the current index)
+		const exists = this._transitions.some(
+			(other, i) =>
+				i !== index &&
+				other.transitionFrom === t.transitionFrom &&
+				other.transitionTo === t.transitionTo &&
+				other.read == read &&
+				other.write == write &&
+				other.move == move
+		);
+		if (exists) {
+			this._transitions = [
+				...this._transitions.slice(0, index),
+				...this._transitions.slice(index + 1)
+			];
+			return;
+		}
+
+		// Update the transition
+		t.read = read;
+		t.write = write;
+		t.move = move;
+	}
+
+	deleteTransition(index) {
+		if (index >= 0 && index < this._transitions.length) {
+			this._transitions.splice(index, 1);
+		}
 	}
 }
 

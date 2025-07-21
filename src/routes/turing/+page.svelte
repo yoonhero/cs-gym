@@ -5,7 +5,7 @@
 	import { Graph } from './Graph';
 	import { updateTransitionMapFromAlgorithm } from './Parser';
 
-	let currentView = $state('editor'); // 'machine' or 'editor'
+	let currentView = $state('machine'); // 'machine' or 'editor'
 
 	let algorithm = $state('0->1:0,0/R; 0->2:1,1/R; 1->3:0,0/R; 1->3:1,0/R; 2->3:0,1/R; 2->3:1,1/R;');
 	let transitions = $state({});
